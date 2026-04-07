@@ -1,0 +1,47 @@
+@import 'tailwindcss';
+
+:root {
+  --bg-primary: #0a0e17;
+  --bg-secondary: #111827;
+  --bg-tertiary: #1f2937;
+  --border: #374151;
+  --text-primary: #f3f4f6;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --green: #22c55e;
+  --green-dim: #166534;
+  --red: #ef4444;
+  --red-dim: #991b1b;
+  --blue: #3b82f6;
+  --yellow: #eab308;
+}
+
+html, body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+/* Utility classes for trading colors */
+.text-bid { color: var(--green); }
+.text-ask { color: var(--red); }
+.bg-bid { background-color: var(--green-dim); }
+.bg-ask { background-color: var(--red-dim); }

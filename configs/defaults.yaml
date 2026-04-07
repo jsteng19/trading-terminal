@@ -1,0 +1,14 @@
+# Trading Terminal Configuration
+# ─────────────────────────────
+
+# Maximum contracts allowed per single order
+max_order_contracts: 500
+
+# Default order size
+default_order_size: 100
+
+# Size increment for keyboard shortcuts (+/-)
+size_increment: 100
+
+# Default subaccount
+subaccount: 1
