@@ -15,6 +15,7 @@
 				title: e.title ?? e.event_ticker,
 				series_ticker: e.series_ticker ?? '',
 				category: e.category ?? '',
+				close_time: e.close_time ?? e.expected_expiration_time ?? null,
 			})));
 		} catch (e) {
 			console.error('Failed to load events:', e);
@@ -40,6 +41,7 @@
 					volume: m.volume,
 					open_interest: m.open_interest,
 					status: m.status,
+					close_time: m.close_time ?? m.expected_expiration_time ?? null,
 				}))
 				.sort((a: MarketSummary, b: MarketSummary) => (b.volume ?? 0) - (a.volume ?? 0));
 			markets.set(sorted);
@@ -107,9 +109,14 @@
 						{/if}
 					</div>
 				</div>
-				{#if market.volume}
-					<div class="text-[var(--text-muted)] text-[10px] ml-5">
-						vol {(market.volume / 1000).toFixed(1)}K
+				{#if market.volume || market.open_interest}
+					<div class="text-[var(--text-muted)] text-[10px] ml-5 flex gap-2">
+						{#if market.volume}
+							<span>vol {market.volume > 1000 ? (market.volume / 1000).toFixed(1) + 'K' : market.volume}</span>
+						{/if}
+						{#if market.open_interest}
+							<span>OI {market.open_interest > 1000 ? (market.open_interest / 1000).toFixed(1) + 'K' : market.open_interest}</span>
+						{/if}
 					</div>
 				{/if}
 			</button>

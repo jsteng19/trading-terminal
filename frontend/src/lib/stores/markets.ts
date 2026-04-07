@@ -13,6 +13,7 @@ export type MarketSummary = {
 	volume: number | null;
 	open_interest: number | null;
 	status: string;
+	close_time: string | null;
 	// enriched by position data
 	position?: number;
 	pnl?: number;
@@ -23,6 +24,7 @@ export type EventSummary = {
 	title: string;
 	series_ticker: string;
 	category: string;
+	close_time: string | null;   // ISO timestamp — when trading closes (event start)
 };
 
 export const events = writable<EventSummary[]>([]);
