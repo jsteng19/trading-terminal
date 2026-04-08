@@ -51,6 +51,12 @@ class EventStream:
     latest_books: dict[str, dict] = field(default_factory=dict)
     dirty_tickers: set[str] = field(default_factory=set)
     last_flush: float = 0.0
+    # Stored for stream rebuilds on error
+    _api_key_id: str = ""
+    _private_key_pem: str = ""
+    _demo: bool = False
+    _on_update: Any = None
+    _on_trade: Any = None
 
 
 class StreamHub:
@@ -108,6 +114,12 @@ class StreamHub:
             except RuntimeError:
                 pass  # Loop closed during shutdown
 
+        es._api_key_id = api_key_id
+        es._private_key_pem = private_key_pem
+        es._demo = demo
+        es._on_update = on_update
+        es._on_trade = on_trade
+
         es.stream = OrderBookStream(
             api_key_id=api_key_id,
             private_key_pem=private_key_pem,
@@ -123,13 +135,38 @@ class StreamHub:
         logger.info("Started stream for event=%s with %d tickers", event_ticker, len(tickers))
 
     async def _run_stream(self, es: EventStream):
-        """Run the OrderBookStream in the current event loop."""
-        try:
-            await es.stream.run()
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception("Stream error for event=%s", es.event_ticker)
+        """Run the OrderBookStream in the current event loop, with auto-restart."""
+        max_retries = 5
+        retry_delay = 2
+        for attempt in range(max_retries):
+            try:
+                await es.stream.run()
+                break  # Clean exit
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception(
+                    "Stream error for event=%s (attempt %d/%d)",
+                    es.event_ticker, attempt + 1, max_retries,
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay * (attempt + 1))
+                    # Cleanup old stream
+                    try:
+                        es.stream._running = False
+                        es.stream._cleanup()
+                    except Exception:
+                        pass
+                    # Rebuild stream with stored config
+                    es.stream = OrderBookStream(
+                        api_key_id=es._api_key_id,
+                        private_key_pem=es._private_key_pem,
+                        tickers=es.tickers,
+                        on_update=es._on_update,
+                        on_trade=es._on_trade,
+                        demo=es._demo,
+                    )
+        logger.error("Stream for event=%s exhausted retries", es.event_ticker)
 
     async def _flush_loop(self, es: EventStream):
         """Periodically flush coalesced book updates to WS clients."""

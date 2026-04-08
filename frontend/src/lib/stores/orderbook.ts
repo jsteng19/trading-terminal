@@ -13,6 +13,8 @@ export type BookData = {
 	no_bids: BookLevel[];
 	best_yes_bid: number | null;
 	best_yes_ask: number | null;
+	best_no_bid: number | null;
+	best_no_ask: number | null;
 	spread: number | null;
 	midpoint: number | null;
 	ts: number;
@@ -28,8 +30,5 @@ export const currentBook = derived(
 );
 
 export function updateBook(ticker: string, data: BookData) {
-	books.update((b) => {
-		b[ticker] = data;
-		return b;
-	});
+	books.update((b) => ({ ...b, [ticker]: data }));
 }

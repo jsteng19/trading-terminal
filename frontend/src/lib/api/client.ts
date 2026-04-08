@@ -110,6 +110,7 @@ export async function estimateCost(side: string, price: number, count: number, p
 		fee_dollars?: number;
 		total_cost?: number;
 		effective_price?: number;
+		is_taker?: boolean;
 		role?: string;
 		error?: string;
 	}>('/api/orders/estimate', {

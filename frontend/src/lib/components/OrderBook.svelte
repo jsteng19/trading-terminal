@@ -1,17 +1,23 @@
 <script lang="ts">
 	import { currentBook, type BookLevel } from '$lib/stores/orderbook';
-	import { selectedMarketTicker } from '$lib/stores/markets';
+	import { selectedMarketTicker, selectedMarket } from '$lib/stores/markets';
+	import { currentOrders } from '$lib/stores/orders';
+	import { tick } from 'svelte';
 
 	/**
 	 * Click callback: (price, count, side, postOnly) => void
 	 * - Clicking an ask level = TAKE: side matches view, count = cumulative to clear, postOnly = false
 	 * - Clicking a bid level = JOIN: side matches view, count = level qty or default, postOnly = true
+	 * - Clicking an empty level = new order at that price, postOnly = true
 	 */
 	type BookClickHandler = (price: number, count: number, side: 'yes' | 'no', postOnly: boolean) => void;
 	let { onlevelclick, defaultCount = 100 }: { onlevelclick?: BookClickHandler; defaultCount?: number } = $props();
 
 	// YES/NO view toggle
 	let viewSide = $state<'yes' | 'no'>('yes');
+
+	// Ref for the ladder container (for auto-scroll)
+	let ladderEl: HTMLDivElement | undefined = $state();
 
 	type LadderRow = {
 		price: number;        // in terms of the viewed side
@@ -20,7 +26,35 @@
 		bidCumul: number;
 		askCumul: number;
 		isSpread: boolean;
+		myBidQty: number;     // user's resting bid quantity at this price
+		myAskQty: number;     // user's resting ask quantity at this price
 	};
+
+	// Build a map of user's resting orders by price for the current view side
+	let myOrderMap = $derived.by(() => {
+		const orders = $currentOrders;
+		const bidMap = new Map<number, number>();
+		const askMap = new Map<number, number>();
+		for (const o of orders) {
+			if (viewSide === 'yes') {
+				if (o.side === 'yes') {
+					bidMap.set(o.price, (bidMap.get(o.price) ?? 0) + o.remaining);
+				} else {
+					// NO order appears as ask at 100 - price
+					const askPrice = 100 - o.price;
+					askMap.set(askPrice, (askMap.get(askPrice) ?? 0) + o.remaining);
+				}
+			} else {
+				if (o.side === 'no') {
+					bidMap.set(o.price, (bidMap.get(o.price) ?? 0) + o.remaining);
+				} else {
+					const askPrice = 100 - o.price;
+					askMap.set(askPrice, (askMap.get(askPrice) ?? 0) + o.remaining);
+				}
+			}
+		}
+		return { bidMap, askMap };
+	});
 
 	let ladder = $derived.by(() => {
 		const book = $currentBook;
@@ -100,6 +134,8 @@
 			bidCumulMap.set(p, runningBid);
 		}
 
+		const { bidMap: myBids, askMap: myAsks } = myOrderMap;
+
 		const rows: LadderRow[] = [];
 		for (let i = sortedPrices.length - 1; i >= 0; i--) {
 			const p = sortedPrices[i];
@@ -111,6 +147,8 @@
 				bidCumul: bidCumulMap.get(p) ?? 0,
 				askCumul: askCumulMap.get(p) ?? 0,
 				isSpread,
+				myBidQty: myBids.get(p) ?? 0,
+				myAskQty: myAsks.get(p) ?? 0,
 			});
 		}
 		return rows;
@@ -123,7 +161,6 @@
 		const book = $currentBook;
 		if (!book) return null;
 		if (viewSide === 'yes') return book.spread;
-		// NO view: spread is same as YES spread
 		const noBid = book.best_no_bid;
 		const noAsk = book.best_no_ask;
 		if (noBid == null || noAsk == null) return null;
@@ -140,6 +177,9 @@
 		return (noBid + noAsk) / 2;
 	});
 
+	// Last price from market data
+	let lastPrice = $derived($selectedMarket?.last_price ?? null);
+
 	function handleBidClick(row: LadderRow) {
 		// Click on bid = JOIN this level (post_only = true, maker)
 		const qty = row.bidQty > 0 ? row.bidQty : defaultCount;
@@ -148,13 +188,46 @@
 
 	function handleAskClick(row: LadderRow) {
 		// Click on ask = TAKE through this level (post_only = false, taker)
-		// Use cumulative contracts to clear up to and including this level
 		const qty = row.askCumul > 0 ? row.askCumul : defaultCount;
 		onlevelclick?.(row.price, qty, viewSide, false);
 	}
 
+	function handlePriceClick(row: LadderRow) {
+		// Click on price = create new order at this price (post_only = true, maker)
+		onlevelclick?.(row.price, defaultCount, viewSide, true);
+	}
+
 	export function toggleView() {
 		viewSide = viewSide === 'yes' ? 'no' : 'yes';
+	}
+
+	// Auto-center on spread when market changes
+	let lastCenteredTicker = '';
+	$effect(() => {
+		const ticker = $selectedMarketTicker;
+		const rows = ladder;
+		if (!ticker || rows.length === 0) return;
+		if (ticker === lastCenteredTicker) return;
+		lastCenteredTicker = ticker;
+		// Wait for DOM to render
+		tick().then(() => {
+			scrollToSpread();
+		});
+	});
+
+	function scrollToSpread() {
+		if (!ladderEl) return;
+		const spreadRow = ladderEl.querySelector('[data-spread]');
+		if (spreadRow) {
+			spreadRow.scrollIntoView({ block: 'center', behavior: 'instant' });
+		} else {
+			// No spread rows — center on the middle of the ladder
+			const rows = ladderEl.querySelectorAll('[data-row]');
+			if (rows.length > 0) {
+				const mid = rows[Math.floor(rows.length / 2)];
+				mid.scrollIntoView({ block: 'center', behavior: 'instant' });
+			}
+		}
 	}
 </script>
 
@@ -181,41 +254,48 @@
 	</div>
 
 	<!-- Column headers -->
-	<div class="grid grid-cols-[55px_55px_36px_55px_55px] gap-0 px-1 py-0.5 border-b border-[var(--border)] text-[10px] text-[var(--text-muted)]">
+	<div class="grid grid-cols-[40px_50px_16px_36px_16px_50px_40px] gap-0 px-1 py-0.5 border-b border-[var(--border)] text-[10px] text-[var(--text-muted)]">
 		<span class="text-right">Cumul</span>
 		<span class="text-right">Bid</span>
+		<span></span>
 		<span class="text-center">Price</span>
+		<span></span>
 		<span class="text-left">Ask</span>
 		<span class="text-left">Cumul</span>
 	</div>
 
 	<!-- Ladder -->
-	<div class="flex-1 overflow-y-auto" id="orderbook-ladder">
+	<div class="flex-1 overflow-y-auto" id="orderbook-ladder" bind:this={ladderEl}>
 		{#each ladder as row}
 			{@const bidWidth = (row.bidQty / maxQty) * 100}
 			{@const askWidth = (row.askQty / maxQty) * 100}
 			<div
-				class="grid grid-cols-[55px_55px_36px_55px_55px] gap-0 px-1 py-px text-xs relative
+				class="grid grid-cols-[40px_50px_16px_36px_16px_50px_40px] gap-0 px-1 py-px text-xs relative
 					{row.isSpread ? 'bg-[var(--bg-secondary)]' : ''}"
+				data-row
+				data-spread={row.isSpread ? '' : undefined}
 			>
 				<!-- Bid depth bar -->
 				{#if row.bidQty > 0}
 					<div
-						class="absolute right-[calc(50%+18px)] top-0 bottom-0 bg-[var(--green-dim)] opacity-30"
-						style="width: {bidWidth * 0.4}%"
+						class="absolute top-0 bottom-0 bg-[var(--green-dim)] opacity-30"
+						style="right: calc(50% + 18px); width: {bidWidth * 0.35}%"
 					></div>
 				{/if}
 				<!-- Ask depth bar -->
 				{#if row.askQty > 0}
 					<div
-						class="absolute left-[calc(50%+18px)] top-0 bottom-0 bg-[var(--red-dim)] opacity-30"
-						style="width: {askWidth * 0.4}%"
+						class="absolute top-0 bottom-0 bg-[var(--red-dim)] opacity-30"
+						style="left: calc(50% + 18px); width: {askWidth * 0.35}%"
 					></div>
 				{/if}
 
+				<!-- Bid cumulative -->
 				<span class="text-right text-[var(--text-muted)] text-[10px] relative z-10">
 					{row.bidCumul > 0 ? row.bidCumul.toLocaleString() : ''}
 				</span>
+
+				<!-- Bid qty (clickable) -->
 				<span
 					class="text-right text-bid relative z-10 font-medium cursor-pointer hover:underline"
 					role="button" tabindex="-1"
@@ -224,9 +304,57 @@
 				>
 					{row.bidQty > 0 ? row.bidQty.toLocaleString() : ''}
 				</span>
-				<span class="text-center text-[var(--text-secondary)] relative z-10 font-medium">
-					{row.price}
+
+				<!-- My bid marker -->
+				<span class="text-center relative z-10 text-[10px]">
+					{#if row.myBidQty > 0}
+						<span class="text-[var(--blue)]" title="My bid: {row.myBidQty}">{row.myBidQty}</span>
+					{/if}
 				</span>
+
+				<!-- Price (clickable for order creation) -->
+				{#if row.isSpread && lastPrice != null}
+					<!-- Show last price in the first spread row -->
+					{@const isFirstSpread = ladder.filter(r => r.isSpread).indexOf(row) === 0}
+					{#if isFirstSpread}
+						<span
+							class="text-center text-[var(--yellow)] relative z-10 font-medium cursor-pointer hover:underline text-[10px]"
+							role="button" tabindex="-1"
+							onclick={() => handlePriceClick(row)}
+							onkeydown={(e) => { if (e.key === 'Enter') handlePriceClick(row); }}
+							title="Last: {lastPrice}c"
+						>
+							L:{lastPrice}
+						</span>
+					{:else}
+						<span
+							class="text-center text-[var(--text-muted)] relative z-10 font-medium cursor-pointer hover:underline"
+							role="button" tabindex="-1"
+							onclick={() => handlePriceClick(row)}
+							onkeydown={(e) => { if (e.key === 'Enter') handlePriceClick(row); }}
+						>
+							{row.price}
+						</span>
+					{/if}
+				{:else}
+					<span
+						class="text-center text-[var(--text-secondary)] relative z-10 font-medium cursor-pointer hover:underline"
+						role="button" tabindex="-1"
+						onclick={() => handlePriceClick(row)}
+						onkeydown={(e) => { if (e.key === 'Enter') handlePriceClick(row); }}
+					>
+						{row.price}
+					</span>
+				{/if}
+
+				<!-- My ask marker -->
+				<span class="text-center relative z-10 text-[10px]">
+					{#if row.myAskQty > 0}
+						<span class="text-[var(--blue)]" title="My ask: {row.myAskQty}">{row.myAskQty}</span>
+					{/if}
+				</span>
+
+				<!-- Ask qty (clickable) -->
 				<span
 					class="text-left text-ask relative z-10 font-medium cursor-pointer hover:underline"
 					role="button" tabindex="-1"
@@ -235,6 +363,8 @@
 				>
 					{row.askQty > 0 ? row.askQty.toLocaleString() : ''}
 				</span>
+
+				<!-- Ask cumulative -->
 				<span class="text-left text-[var(--text-muted)] text-[10px] relative z-10">
 					{row.askCumul > 0 ? row.askCumul.toLocaleString() : ''}
 				</span>

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { selectedMarketTicker, selectedMarket } from '$lib/stores/markets';
+	import { selectedMarketTicker, selectedMarket, selectedEvent } from '$lib/stores/markets';
 	import { currentBook } from '$lib/stores/orderbook';
 	import { placeOrder, estimateCost } from '$lib/api/client';
 
@@ -19,6 +19,40 @@
 	let postOnly = $state(true);
 	let submitting = $state(false);
 	let lastResult = $state<{ ok: boolean; message: string } | null>(null);
+
+	// Expiration
+	type ExpirationMode = 'none' | 'event_close' | 'custom';
+	let expirationMode = $state<ExpirationMode>('none');
+	let customExpirationMinutes = $state(30);
+
+	// Compute expiration timestamp
+	let expirationTs = $derived.by((): number | null => {
+		if (expirationMode === 'none') return null;
+		if (expirationMode === 'event_close') {
+			// Use market close_time first, fall back to event close_time
+			const closeStr = $selectedMarket?.close_time ?? $selectedEvent?.close_time;
+			if (!closeStr) return null;
+			const ts = Math.floor(new Date(closeStr).getTime() / 1000);
+			if (isNaN(ts) || ts <= Date.now() / 1000) return null;
+			return ts;
+		}
+		if (expirationMode === 'custom') {
+			return Math.floor(Date.now() / 1000) + customExpirationMinutes * 60;
+		}
+		return null;
+	});
+
+	// Human-readable expiration label
+	let expirationLabel = $derived.by((): string => {
+		if (expirationMode === 'none') return '';
+		if (expirationTs == null) return '(no close time)';
+		const d = new Date(expirationTs * 1000);
+		const now = Date.now();
+		const diffMin = Math.round((expirationTs * 1000 - now) / 60000);
+		if (diffMin < 60) return `in ${diffMin}m`;
+		if (diffMin < 1440) return `in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`;
+		return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+	});
 
 	// Cost estimate
 	let costEstimate = $state<{ total: string; fee: string; label: string } | null>(null);
@@ -51,7 +85,14 @@
 		submitting = true;
 		lastResult = null;
 		try {
-			const res = await placeOrder({ ticker, side, price, count, post_only: postOnly });
+			const res = await placeOrder({
+				ticker,
+				side,
+				price,
+				count,
+				post_only: postOnly,
+				expiration_ts: expirationTs ?? undefined,
+			});
 			if (res.ok) {
 				lastResult = { ok: true, message: `${side.toUpperCase()} ${count}@${price}c placed` };
 			} else {
@@ -133,6 +174,31 @@
 		<input type="checkbox" bind:checked={postOnly} class="accent-[var(--blue)]" />
 		<span class="text-[var(--text-secondary)]">Post Only (maker, no fee)</span>
 	</label>
+
+	<!-- Expiration -->
+	<div class="flex items-center gap-1">
+		<span class="text-[10px] text-[var(--text-muted)] w-10">Exp</span>
+		<select
+			bind:value={expirationMode}
+			class="bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] rounded text-[10px] py-0.5 px-1"
+		>
+			<option value="none">None (GTC)</option>
+			<option value="event_close">Event Close</option>
+			<option value="custom">Custom</option>
+		</select>
+		{#if expirationMode === 'custom'}
+			<input
+				type="number"
+				bind:value={customExpirationMinutes}
+				min="1" max="10080"
+				class="w-12 text-center bg-[var(--bg-tertiary)] border border-[var(--border)] rounded text-[10px] py-0.5"
+			/>
+			<span class="text-[10px] text-[var(--text-muted)]">min</span>
+		{/if}
+		{#if expirationMode !== 'none' && expirationLabel}
+			<span class="text-[10px] text-[var(--text-muted)]">{expirationLabel}</span>
+		{/if}
+	</div>
 
 	<!-- Cost estimate -->
 	{#if costEstimate}

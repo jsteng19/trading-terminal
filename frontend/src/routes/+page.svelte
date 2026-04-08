@@ -3,7 +3,7 @@
 	import MarketSelector from '$lib/components/MarketSelector.svelte';
 	import OrderBook from '$lib/components/OrderBook.svelte';
 	import TradeTape from '$lib/components/TradeTape.svelte';
-	import StatsBar from '$lib/components/StatsBar.svelte';
+	// StatsBar removed — OI/vol shown in MarketSelector, last in orderbook spread
 	import OrderEntry from '$lib/components/OrderEntry.svelte';
 	import RestingOrders from '$lib/components/RestingOrders.svelte';
 	import { selectedEventTicker, selectedMarketTicker, selectedMarket, markets } from '$lib/stores/markets';
@@ -84,14 +84,24 @@
 		if (!ticker) return;
 		fetchOrderbook(ticker).then((res) => {
 			const ob = res.orderbook;
+			const yesBids: [number, number][] = ob.yes || [];
+			const noBids: [number, number][] = ob.no || [];
+			const bestYesBid = yesBids.length > 0 ? Math.max(...yesBids.map((l: number[]) => l[0])) : null;
+			const bestNoBid = noBids.length > 0 ? Math.max(...noBids.map((l: number[]) => l[0])) : null;
+			const bestYesAsk = bestNoBid != null ? 100 - bestNoBid : null;
+			const bestNoAsk = bestYesBid != null ? 100 - bestYesBid : null;
+			const spread = bestYesBid != null && bestYesAsk != null ? bestYesAsk - bestYesBid : null;
+			const midpoint = bestYesBid != null && bestYesAsk != null ? (bestYesBid + bestYesAsk) / 2 : null;
 			updateBook(ticker, {
 				ticker,
-				yes_bids: ob.yes || [],
-				no_bids: ob.no || [],
-				best_yes_bid: null,
-				best_yes_ask: null,
-				spread: null,
-				midpoint: null,
+				yes_bids: yesBids,
+				no_bids: noBids,
+				best_yes_bid: bestYesBid,
+				best_yes_ask: bestYesAsk,
+				best_no_bid: bestNoBid,
+				best_no_ask: bestNoAsk,
+				spread,
+				midpoint,
 				ts: Date.now() / 1000,
 			});
 		}).catch((e) => console.error('Failed to fetch orderbook:', e));
@@ -119,7 +129,6 @@
 
 	onDestroy(() => {
 		clearInterval(connectionPoll);
-		unsubWs?.();
 		wsClient.disconnect();
 	});
 
@@ -286,8 +295,6 @@
 	</div>
 </div>
 
-<!-- Bottom: Stats bar -->
-<StatsBar />
 
 <!-- Keyboard shortcut help modal -->
 {#if showShortcutHelp}
@@ -298,7 +305,7 @@
 				<span class="text-[var(--text-muted)]">Y / N</span><span>Set side YES / NO</span>
 				<span class="text-[var(--text-muted)]">Up / Down</span><span>Price +/- 1c</span>
 				<span class="text-[var(--text-muted)]">Shift+Up/Dn</span><span>Price +/- 5c</span>
-				<span class="text-[var(--text-muted)]">] / [</span><span>Size +/- 10</span>
+				<span class="text-[var(--text-muted)]">] / [</span><span>Size +/- {sizeIncrement}</span>
 				<span class="text-[var(--text-muted)]">Enter</span><span>Place order</span>
 				<span class="text-[var(--text-muted)]">Escape</span><span>Cancel all (ticker)</span>
 				<span class="text-[var(--text-muted)]">Shift+Esc</span><span>Cancel all (event)</span>
