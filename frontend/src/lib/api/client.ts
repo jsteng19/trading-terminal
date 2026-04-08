@@ -29,6 +29,10 @@ export async function fetchEventMarkets(eventTicker: string) {
 	return apiFetch<{ markets: any[] }>(`/api/markets/event/${eventTicker}/markets`);
 }
 
+export async function fetchEventStartTime(eventTicker: string) {
+	return apiFetch<{ event_start_utc: string | null; source: string }>(`/api/markets/event/${eventTicker}/start-time`);
+}
+
 export async function fetchMarket(ticker: string) {
 	return apiFetch<{ market: any }>(`/api/markets/market/${ticker}`);
 }

@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { selectedMarketTicker, selectedMarket, selectedEvent } from '$lib/stores/markets';
+	import { selectedMarketTicker, selectedMarket, selectedEvent, selectedEventTicker } from '$lib/stores/markets';
 	import { currentBook } from '$lib/stores/orderbook';
-	import { placeOrder, estimateCost } from '$lib/api/client';
+	import { placeOrder, estimateCost, fetchEventStartTime } from '$lib/api/client';
 
 	let {
 		defaultSize = 100,
@@ -21,18 +21,61 @@
 	let lastResult = $state<{ ok: boolean; message: string } | null>(null);
 
 	// Expiration
-	type ExpirationMode = 'none' | 'event_close' | 'custom';
+	type ExpirationMode = 'none' | '10min' | 'eod' | 'event_start' | 'custom';
 	let expirationMode = $state<ExpirationMode>('none');
 	let customExpirationMinutes = $state(30);
+
+	// Event start time (fetched from backend, uses cutoff_resolver)
+	let eventStartUtc = $state<string | null>(null);
+	let eventStartAvailable = $state(false);
+
+	$effect(() => {
+		const eventTicker = $selectedEventTicker;
+		if (!eventTicker) {
+			eventStartUtc = null;
+			eventStartAvailable = false;
+			return;
+		}
+		fetchEventStartTime(eventTicker).then((res) => {
+			eventStartUtc = res.event_start_utc;
+			eventStartAvailable = res.event_start_utc != null;
+		}).catch(() => {
+			eventStartUtc = null;
+			eventStartAvailable = false;
+		});
+	});
 
 	// Compute expiration timestamp
 	let expirationTs = $derived.by((): number | null => {
 		if (expirationMode === 'none') return null;
-		if (expirationMode === 'event_close') {
-			// Use market close_time first, fall back to event close_time
-			const closeStr = $selectedMarket?.close_time ?? $selectedEvent?.close_time;
-			if (!closeStr) return null;
-			const ts = Math.floor(new Date(closeStr).getTime() / 1000);
+		if (expirationMode === '10min') {
+			return Math.floor(Date.now() / 1000) + 10 * 60;
+		}
+		if (expirationMode === 'eod') {
+			// End of day 4:00 PM ET (Eastern)
+			const now = new Date();
+			// Build today at 4pm ET using Intl to handle DST
+			const etFormatter = new Intl.DateTimeFormat('en-US', {
+				timeZone: 'America/New_York',
+				year: 'numeric', month: '2-digit', day: '2-digit',
+			});
+			const parts = etFormatter.formatToParts(now);
+			const y = parts.find(p => p.type === 'year')!.value;
+			const m = parts.find(p => p.type === 'month')!.value;
+			const d = parts.find(p => p.type === 'day')!.value;
+			// 4:00 PM ET = 16:00
+			const eodEt = new Date(`${y}-${m}-${d}T16:00:00`);
+			// Convert ET to UTC by finding the offset
+			const etNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+			const offsetMs = now.getTime() - etNow.getTime();
+			const eodUtc = new Date(eodEt.getTime() + offsetMs);
+			const ts = Math.floor(eodUtc.getTime() / 1000);
+			if (ts <= Date.now() / 1000) return null; // Already past EOD
+			return ts;
+		}
+		if (expirationMode === 'event_start') {
+			if (!eventStartUtc) return null;
+			const ts = Math.floor(new Date(eventStartUtc).getTime() / 1000);
 			if (isNaN(ts) || ts <= Date.now() / 1000) return null;
 			return ts;
 		}
@@ -42,16 +85,25 @@
 		return null;
 	});
 
-	// Human-readable expiration label
+	// Format time in local timezone, always showing clock time
+	function formatLocalTime(ts: number): string {
+		const d = new Date(ts * 1000);
+		return d.toLocaleString(undefined, {
+			month: 'short', day: 'numeric',
+			hour: 'numeric', minute: '2-digit',
+			hour12: true,
+		});
+	}
+
+	// Human-readable expiration label — always local time
 	let expirationLabel = $derived.by((): string => {
 		if (expirationMode === 'none') return '';
-		if (expirationTs == null) return '(no close time)';
-		const d = new Date(expirationTs * 1000);
-		const now = Date.now();
-		const diffMin = Math.round((expirationTs * 1000 - now) / 60000);
-		if (diffMin < 60) return `in ${diffMin}m`;
-		if (diffMin < 1440) return `in ${Math.floor(diffMin / 60)}h ${diffMin % 60}m`;
-		return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+		if (expirationTs == null) {
+			if (expirationMode === 'event_start') return '(no start time)';
+			if (expirationMode === 'eod') return '(past EOD)';
+			return '';
+		}
+		return formatLocalTime(expirationTs);
 	});
 
 	// Cost estimate
@@ -176,14 +228,18 @@
 	</label>
 
 	<!-- Expiration -->
-	<div class="flex items-center gap-1">
+	<div class="flex items-center gap-1 flex-wrap">
 		<span class="text-[10px] text-[var(--text-muted)] w-10">Exp</span>
 		<select
 			bind:value={expirationMode}
 			class="bg-[var(--bg-tertiary)] border border-[var(--border)] text-[var(--text-primary)] rounded text-[10px] py-0.5 px-1"
 		>
 			<option value="none">None (GTC)</option>
-			<option value="event_close">Event Close</option>
+			<option value="10min">10 min</option>
+			<option value="eod">EOD (4pm ET)</option>
+			{#if eventStartAvailable}
+				<option value="event_start">Event Start</option>
+			{/if}
 			<option value="custom">Custom</option>
 		</select>
 		{#if expirationMode === 'custom'}
@@ -196,7 +252,7 @@
 			<span class="text-[10px] text-[var(--text-muted)]">min</span>
 		{/if}
 		{#if expirationMode !== 'none' && expirationLabel}
-			<span class="text-[10px] text-[var(--text-muted)]">{expirationLabel}</span>
+			<span class="text-[10px] text-[var(--text-secondary)]">{expirationLabel}</span>
 		{/if}
 	</div>
 

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import APIRouter, Query
 
 from backend.dependencies import get_market_data
+from backend.lazy_import import lazy_import
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,28 @@ def list_markets(event_ticker: str):
     md = get_market_data()
     markets = md.get_markets(event_ticker=event_ticker)
     return {"markets": markets}
+
+
+@router.get("/event/{event_ticker}/start-time")
+def get_event_start_time(event_ticker: str):
+    """Resolve event start time using kalshi_tools cutoff resolver.
+
+    Returns ISO timestamp of event start or null if unresolvable.
+    """
+    md = get_market_data()
+    try:
+        _cutoff_mod = lazy_import("kalshi_tools.execution.cutoff_resolver")
+        resolve_fn = _cutoff_mod.resolve_event_start_cutoff_utc
+        start_utc, details = resolve_fn(md, event_ticker)
+        if start_utc is not None:
+            return {
+                "event_start_utc": start_utc.isoformat(),
+                "source": details.get("source", "unknown"),
+            }
+        return {"event_start_utc": None, "source": "unresolved"}
+    except Exception as exc:
+        logger.warning("Failed to resolve event start for %s: %s", event_ticker, exc)
+        return {"event_start_utc": None, "source": "error"}
 
 
 @router.get("/market/{ticker}")
