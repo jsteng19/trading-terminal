@@ -46,12 +46,20 @@
 		}
 	});
 
+	// Track tab visibility — when hidden we suspend the live stream so the
+	// browser doesn't buffer up minutes of WS messages and then "fast-forward"
+	// the orderbook + trade tape when the user returns.
+	let tabVisible = $state(typeof document !== 'undefined' ? !document.hidden : true);
+
 	// Handle WS messages — register handler once
 	let wsHandlerRegistered = false;
 
 	function ensureWsHandler() {
 		if (wsHandlerRegistered) return;
 		wsClient.onMessage((msg: WsMessage) => {
+			// Drop any messages that arrive while the tab is hidden.
+			// We'll refresh state via REST when the tab becomes visible.
+			if (!tabVisible) return;
 			if (msg.type === 'book' && msg.ticker) {
 				updateBook(msg.ticker, msg.data);
 			} else if (msg.type === 'trade' && msg.ticker) {
@@ -78,11 +86,47 @@
 		}
 	});
 
-	// Load initial orderbook + trades via REST when market changes
-	$effect(() => {
-		const ticker = $selectedMarketTicker;
-		if (!ticker) return;
-		fetchOrderbook(ticker).then((res) => {
+	// On tab visibility change: pause/resume the WS stream and refresh state.
+	function handleVisibilityChange() {
+		const visible = !document.hidden;
+		if (visible === tabVisible) return;
+		tabVisible = visible;
+
+		if (visible) {
+			// Tab is back. Force a fresh REST snapshot and reconnect WS so we
+			// drop any stale buffered messages and jump straight to current state.
+			const ticker = $selectedMarketTicker;
+			if (ticker) refreshOrderbookREST(ticker);
+			const eventTicker = $selectedEventTicker;
+			if (eventTicker && token) {
+				wsClient.disconnect();
+				connectedEvent = eventTicker;
+				wsClient.connect(eventTicker, token);
+			}
+		} else {
+			// Tab is hidden. Disconnect WS so the browser doesn't queue
+			// minutes of orderbook/trade messages that all flush on return.
+			wsClient.disconnect();
+			connectedEvent = '';
+		}
+	}
+
+	onMount(() => {
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+	});
+
+	onDestroy(() => {
+		if (typeof document !== 'undefined') {
+			document.removeEventListener('visibilitychange', handleVisibilityChange);
+		}
+	});
+
+	// Refresh full-depth orderbook via REST.
+	// Kalshi's WebSocket feed only emits top ~10-15 levels per side.
+	// We poll REST (depth=100) to get the full ladder; WS continues to drive
+	// fast top-of-book updates between polls.
+	function refreshOrderbookREST(ticker: string) {
+		fetchOrderbook(ticker, 100).then((res) => {
 			const ob = res.orderbook;
 			const yesBids: [number, number][] = ob.yes || [];
 			const noBids: [number, number][] = ob.no || [];
@@ -105,6 +149,24 @@
 				ts: Date.now() / 1000,
 			});
 		}).catch((e) => console.error('Failed to fetch orderbook:', e));
+	}
+
+	// Load + periodically refresh orderbook for the selected market.
+	// Paused while the tab is hidden — handleVisibilityChange does a one-shot
+	// refresh on return.
+	$effect(() => {
+		const ticker = $selectedMarketTicker;
+		const visible = tabVisible;
+		if (!ticker || !visible) return;
+		refreshOrderbookREST(ticker);
+		const poll = setInterval(() => refreshOrderbookREST(ticker), 2000);
+		return () => clearInterval(poll);
+	});
+
+	// Load initial trades via REST when market changes
+	$effect(() => {
+		const ticker = $selectedMarketTicker;
+		if (!ticker) return;
 		fetchTrades(ticker, 100).then((res) => {
 			for (const t of res.trades.reverse()) {
 				addTrade({
