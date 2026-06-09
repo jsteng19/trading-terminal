@@ -5,13 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trading-terminal"
 version = "0.1.0"
-description = "Personal Kalshi trading terminal"
+description = "Local web-based trading terminal for Kalshi prediction markets"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "python-multipart>=0.0.6",
-    "kalshi_tools",
+    "pykalshi>=1.0.1",
+    "pandas>=2.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -16,17 +16,17 @@ import webbrowser
 from pathlib import Path
 
 # ── Ensure sys.path includes all needed source dirs ──
-_root = Path(__file__).resolve().parent.parent
+_here = Path(__file__).resolve().parent
 _paths = [
-    str(Path(__file__).resolve().parent),           # backend package
-    str(_root / "kalshi_tools" / "src"),             # kalshi_tools
+    str(_here),                          # repo root → `backend` package
+    str(_here / "backend" / "vendor"),   # vendored `kalshi_tools` (wraps pykalshi)
 ]
 for p in _paths:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-# Load .env from kalshi_tools
-_env = _root / "kalshi_tools" / ".env"
+# Load .env (KALSHI_API_KEY_ID, KALSHI_PRIVATE_KEY_PATH, ...)
+_env = _here / ".env"
 if _env.exists():
     for line in _env.read_text().splitlines():
         line = line.strip()

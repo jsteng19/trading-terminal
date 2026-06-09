@@ -4,10 +4,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from backend.lazy_import import lazy_import
-
-_client_mod = lazy_import("kalshi_tools.core.client")
-_market_data_mod = lazy_import("kalshi_tools.core.market_data")
+from kalshi_tools.core.client import get_client as _make_client
+from kalshi_tools.core.market_data import MarketData
 
 from backend.config import DEMO
 
@@ -19,7 +17,7 @@ def get_client():
     """Get or create the shared KalshiClient singleton."""
     global _client
     if _client is None:
-        _client = _client_mod.get_client(demo=DEMO)
+        _client = _make_client(demo=DEMO)
     return _client
 
 
@@ -27,7 +25,6 @@ def get_market_data():
     """Get or create the shared MarketData singleton."""
     global _market_data
     if _market_data is None:
-        MarketData = _market_data_mod.MarketData
         _market_data = MarketData(client=get_client())
     return _market_data
 

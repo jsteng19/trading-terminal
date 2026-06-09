@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import APIRouter, Query
 
 from backend.dependencies import get_market_data
-from backend.lazy_import import lazy_import
+from kalshi_tools.execution.cutoff_resolver import resolve_event_start_cutoff_utc
 
 logger = logging.getLogger(__name__)
 
@@ -145,9 +145,7 @@ def get_event_start_time(event_ticker: str):
     """
     md = get_market_data()
     try:
-        _cutoff_mod = lazy_import("kalshi_tools.execution.cutoff_resolver")
-        resolve_fn = _cutoff_mod.resolve_event_start_cutoff_utc
-        start_utc, details = resolve_fn(md, event_ticker)
+        start_utc, details = resolve_event_start_cutoff_utc(md, event_ticker)
         if start_utc is not None:
             return {
                 "event_start_utc": start_utc.isoformat(),

@@ -18,12 +18,7 @@ from typing import Optional
 
 from backend.config import SUBACCOUNT, MAX_ORDER_CONTRACTS
 from backend.dependencies import get_client, get_market_data
-from backend.lazy_import import lazy_import
-
-_om_mod = lazy_import("kalshi_tools.execution.order_manager")
-
-OrderManager = _om_mod.OrderManager
-LiveOrder = _om_mod.LiveOrder
+from kalshi_tools.execution.order_manager import OrderManager, LiveOrder
 
 logger = logging.getLogger(__name__)
 

@@ -14,14 +14,10 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from backend.config import BOOK_UPDATE_RATE_HZ, STREAM_GRACE_PERIOD_S
-from backend.lazy_import import lazy_import
 from backend.ws.manager import ConnectionManager
+from kalshi_tools.analysis.orderbook import OrderBookStream, OrderBook
 
 logger = logging.getLogger(__name__)
-
-_orderbook_mod = lazy_import("kalshi_tools.analysis.orderbook")
-OrderBookStream = _orderbook_mod.OrderBookStream
-OrderBook = _orderbook_mod.OrderBook
 
 
 def _book_to_dict(book: OrderBook) -> dict:
