@@ -1,24 +1,23 @@
 # Trading Terminal
 
-A local web terminal for trading Kalshi prediction markets. It runs on your machine,
-talks to the Kalshi API, and puts the order ticket, live order book, and resting
-orders on one screen. Quicker to work from than the Kalshi site when you're watching
-several markets at once.
+A local web terminal for trading Kalshi prediction markets. It runs locally,
+talks to the Kalshi API, and displays live order book,the order ticket, and resting
+orders on one screen. Includes keyboard shortcuts for quick trading. 
 
-API keys stay on the local backend; the browser only talks to `127.0.0.1`.
+Kalshi API keys stay on the local backend.
 
 ![Trading terminal](docs/screenshot.png)
 
 ## What it does
 
 - Live order book ladder over WebSocket. Top-of-book streams in (coalesced to 10/sec);
-  full depth is polled from REST so the ladder stays complete.
-- Click a price level to load it into the ticket.
+  full depth is polled from REST.
+- Click a price level to load it into the order ticket.
 - Keyboard order entry: set side, price, size, and send without the mouse.
 - Resting orders with one-key cancel, and cancel-all by market or by event.
 - Live trade tape.
 - Market list that pulls open events and shows your position in each.
-- Demo or live, with every order scoped to a chosen subaccount.
+- Demo or live, with subaccount support.
 
 ## Orders
 
@@ -67,8 +66,9 @@ python run.py                 # opens http://127.0.0.1:8766
 
 Defaults (max order size, default size, increment) live in `configs/defaults.yaml`.
 
-## Not built yet
+## Future Features
 
 - Portfolio page for managing open positions, with live mark-to-market PnL
 - Ladder orders (size resting across multiple price levels)
 - Amend resting orders in place instead of cancel/replace
+- Batch orders across multiple markets
